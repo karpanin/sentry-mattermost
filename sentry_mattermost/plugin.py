@@ -23,6 +23,13 @@ def get_tags(event):
         (tagstore.get_tag_key_label(k), tagstore.get_tag_value_label(k, v)) for k, v in tag_list
     )
 
+class MattermostOptionsForm(notify.NotificationConfigurationForm):
+    recipients = forms.CharField(
+        max_length=255,
+        help_text='The user names of individual users or groups (comma seperated)',
+        required=False,
+    )
+    
 
 class Mattermost(CorePluginMixin, notify.NotificationPlugin):
     title = 'Mattermost'
@@ -33,6 +40,7 @@ class Mattermost(CorePluginMixin, notify.NotificationPlugin):
     author = 'Nathan KREMER'
     author_url = 'https://github.com/xd3coder/sentry-mattermost'
     user_agent = 'sentry-webhooks/%s' % version
+    project_conf_form = MattermostOptionsForm
     feature_descriptions = [
         FeatureDescription(
             """
