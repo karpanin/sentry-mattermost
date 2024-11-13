@@ -186,6 +186,7 @@ class Mattermost(CorePluginMixin, notify.NotificationPlugin):
         event = notification.event
         group = event.group
         project = group.project
+        custom_text = self.get_option("webhook", notification.event.project)
         if not self.is_configured(project):
             return
         webhook = self.get_option("webhook", project).strip()
