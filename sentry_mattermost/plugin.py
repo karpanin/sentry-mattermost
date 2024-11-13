@@ -6,12 +6,28 @@ from sentry_plugins.base import CorePluginMixin
 from sentry.http import safe_urlopen, is_valid_url
 from sentry.utils.safe import safe_execute
 
+from sentry.rules.actions import EventAction
+
 try:
     from sentry.integrations import FeatureDescription, IntegrationFeatures
 except ImportError:
     from sentry.integrations.base import FeatureDescription, IntegrationFeatures
 
 import sentry_mattermost
+
+
+
+class CustomAlertAction(EventAction):
+    id = "my_custom_alert_action.CustomAlertAction"
+    label = "Send alert with custom text"
+
+    form_fields = {
+        "custom_text": {
+            "type": "string",
+            "placeholder": "Enter custom text for this alert",
+            "label": "Custom Text",
+        },
+    }
 
 
 def get_tags(event):
@@ -32,15 +48,6 @@ class Mattermost(CorePluginMixin, notify.NotificationPlugin):
     author = 'Nathan KREMER'
     author_url = 'https://github.com/xd3coder/sentry-mattermost'
     user_agent = 'sentry-webhooks/%s' % version
-    conf_fields = [
-        {
-            'name': 'custom_text',
-            'label': 'Custom Alert Text',
-            'type': 'text',
-            'required': False,
-            'help': 'Enter custom text for alert notifications.',
-        }
-    ]
     feature_descriptions = [
         FeatureDescription(
             """
@@ -186,7 +193,6 @@ class Mattermost(CorePluginMixin, notify.NotificationPlugin):
         event = notification.event
         group = event.group
         project = group.project
-        custom_text = self.get_option("webhook", notification.event.project)
         if not self.is_configured(project):
             return
         webhook = self.get_option("webhook", project).strip()
