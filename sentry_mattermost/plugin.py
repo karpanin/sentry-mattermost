@@ -96,6 +96,7 @@ class Mattermost(CorePluginMixin, notify.NotificationPlugin):
             icon_url = "https://xd3coder.github.io/image-host/sentry-mattermost/64/" + event.get_tag("level") + ".jpg"
         payload = {
             "username": self.get_option("username", project) or "Sentry",
+            "channel": self.get_option("channel", project),
             "icon_url": icon_url,
             "text": self.render_notification(data, self.get_option("custom_format", project))
         }
@@ -140,6 +141,14 @@ class Mattermost(CorePluginMixin, notify.NotificationPlugin):
                 "type": "bool",
                 "required": False,
                 "help": "Write keys before tags in rendered messages.",
+            },
+            {
+                "name": "channel",
+                "label": "Destination",
+                "type": "string",
+                "placeholder": "e.g. #engineering",
+                "required": True,
+                "help": "Optional #channel name or @user",
             },
             {
                 "name": "included_tag_keys",
