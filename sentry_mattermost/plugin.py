@@ -6,6 +6,8 @@ from sentry_plugins.base import CorePluginMixin
 from sentry.http import safe_urlopen, is_valid_url
 from sentry.utils.safe import safe_execute
 
+from django import forms
+
 try:
     from sentry.integrations import FeatureDescription, IntegrationFeatures
 except ImportError:
