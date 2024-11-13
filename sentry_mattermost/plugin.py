@@ -6,8 +6,6 @@ from sentry_plugins.base import CorePluginMixin
 from sentry.http import safe_urlopen, is_valid_url
 from sentry.utils.safe import safe_execute
 
-from django import forms
-
 try:
     from sentry.integrations import FeatureDescription, IntegrationFeatures
 except ImportError:
@@ -25,14 +23,6 @@ def get_tags(event):
         (tagstore.get_tag_key_label(k), tagstore.get_tag_value_label(k, v)) for k, v in tag_list
     )
 
-class MattermostOptionsForm(notify.NotificationConfigurationForm):
-    recipients = forms.CharField(
-        max_length=255,
-        help_text='The user names of individual users or groups (comma seperated)',
-        required=False,
-    )
-    
-
 class Mattermost(CorePluginMixin, notify.NotificationPlugin):
     title = 'Mattermost'
     slug = 'mattermost'
@@ -42,7 +32,15 @@ class Mattermost(CorePluginMixin, notify.NotificationPlugin):
     author = 'Nathan KREMER'
     author_url = 'https://github.com/xd3coder/sentry-mattermost'
     user_agent = 'sentry-webhooks/%s' % version
-    project_conf_form = MattermostOptionsForm
+    conf_fields = [
+        {
+            'name': 'custom_text',
+            'label': 'Custom Alert Text',
+            'type': 'text',
+            'required': False,
+            'help': 'Enter custom text for alert notifications.',
+        }
+    ]
     feature_descriptions = [
         FeatureDescription(
             """
