@@ -29,6 +29,23 @@ class CustomAlertAction(EventAction):
             "label": "Custom Text",
         },
     }
+    def after(self, event, state):
+        """
+        This method is called when the alert rule is triggered.
+        It retrieves the custom text field value and sends the alert.
+        """
+        # Retrieve project and custom text entered in the alert rule
+        project = event.project
+        custom_text = self.get_option("custom_text")
+
+        # Create the alert message with custom text
+        alert_message = f"Alert for {project.slug}: {custom_text}"
+
+        # For demonstration purposes, we'll print the alert message.
+        # In a real setup, replace this with code to send the alert (e.g., via HTTP request, email, etc.).
+        print(alert_message)
+
+        # Example: If you want to send this to an external API or service, do it here.
 
 rules.add(CustomAlertAction)
 
