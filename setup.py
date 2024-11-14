@@ -11,7 +11,7 @@ setup(
     packages=find_packages(exclude=['tests']),
     entry_points={
        'sentry.plugins': [
-            'loop = sentry_loop.plugin:Loop'
+            'loop = sentry_loop.plugin:LoopPlugin'
         ],
     },
 )

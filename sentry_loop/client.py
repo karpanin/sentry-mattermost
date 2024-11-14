@@ -3,7 +3,6 @@ from typing import Any
 
 from sentry_plugins.client import ApiClient
 
-
 class LoopApiClient(ApiClient):
     plugin_name = "loop"
     allow_redirects = False
