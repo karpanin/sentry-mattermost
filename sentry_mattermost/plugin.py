@@ -7,6 +7,7 @@ from sentry.http import safe_urlopen, is_valid_url
 from sentry.utils.safe import safe_execute
 
 from sentry.rules.actions import EventAction
+from sentry.rules import rules
 
 try:
     from sentry.integrations import FeatureDescription, IntegrationFeatures
@@ -29,6 +30,7 @@ class CustomAlertAction(EventAction):
         },
     }
 
+rules.add(CustomAlertAction)
 
 def get_tags(event):
     tag_list = event.tags
