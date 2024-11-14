@@ -2,7 +2,6 @@ from rest_framework import status
 
 from sentry import tagstore
 from sentry.integrations.base import FeatureDescription, IntegrationFeatures
-from sentry.integrations.slack.message_builder.types import LEVEL_TO_COLOR
 from sentry.plugins.base.structs import Notification
 from sentry.plugins.bases import notify
 from sentry.shared_integrations.exceptions import ApiError
@@ -11,6 +10,14 @@ from sentry.utils.http import absolute_uri
 from sentry_plugins.base import CorePluginMixin
 
 from .client import LoopApiClient
+
+LEVEL_TO_COLOR = {
+    "debug": "cfd3da",
+    "info": "2788ce",
+    "warning": "f18500",
+    "error": "f43f20",
+    "fatal": "d20f2a",
+}
 
 IGNORABLE_SLACK_ERRORS = [
     "channel_is_archived",
@@ -140,7 +147,7 @@ class LoopPlugin(CorePluginMixin, notify.NotificationPlugin):
         ]
 
     def color_for_event(self, event):
-        return LEVEL_TO_COLOR.get(event.get_tag("level"), "error")
+        return "#" + LEVEL_TO_COLOR.get(event.get_tag("level"), "error")
 
     def _get_tags(self, event):
         tag_list = event.tags
