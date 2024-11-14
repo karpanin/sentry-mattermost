@@ -1,17 +1,17 @@
 from setuptools import setup, find_packages
 
 setup(
-    name="sentry-mattermost",
-    version='0.0.2',
-    author="Nathan KREMER",
-    author_email="deverlabs@gmail.com",
-    description=("A Sentry plugin to send alerts to Mattermost channel."),
-    keywords="sentry mattermost",
-    url="https://github.com/xd3coder/sentry-mattermost",
+    name="sentry-loop",
+    version='0.0.1',
+    author="Roman Karpanin",
+    author_email="karpanin@litres.ru",
+    description=("A Sentry plugin to send alerts to Loop channel."),
+    keywords="sentry loop",
+    url="https://github.com/karpanin/sentry-mattermost",
     packages=find_packages(exclude=['tests']),
     entry_points={
        'sentry.plugins': [
-            'mattermost = sentry_mattermost.plugin:Mattermost'
+            'loop = sentry_loop.plugin:Loop'
         ],
     },
 )

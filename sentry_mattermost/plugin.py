@@ -1,149 +1,59 @@
-from __future__ import absolute_import
+from rest_framework import status
 
 from sentry import tagstore
+from sentry.integrations.base import FeatureDescription, IntegrationFeatures
+from sentry.integrations.slack.message_builder.types import LEVEL_TO_COLOR
+from sentry.plugins.base.structs import Notification
 from sentry.plugins.bases import notify
+from sentry.shared_integrations.exceptions import ApiError
+from sentry.utils import json
+from sentry.utils.http import absolute_uri
 from sentry_plugins.base import CorePluginMixin
-from sentry.http import safe_urlopen, is_valid_url
-from sentry.utils.safe import safe_execute
 
-from sentry.rules.actions import EventAction
-from sentry.rules import rules
+from .client import LoopApiClient
 
-try:
-    from sentry.integrations import FeatureDescription, IntegrationFeatures
-except ImportError:
-    from sentry.integrations.base import FeatureDescription, IntegrationFeatures
+IGNORABLE_SLACK_ERRORS = [
+    "channel_is_archived",
+    "invalid_channel",
+    "invalid_token",
+    "action_prohibited",
+]
 
-import sentry_mattermost
+IGNORABLE_SLACK_ERROR_CODES = [
+    status.HTTP_404_NOT_FOUND,
+    status.HTTP_429_TOO_MANY_REQUESTS,
+]
 
 
-
-class CustomAlertAction(EventAction):
-    id = "my_custom_alert_action.CustomAlertAction"
-    label = "Send alert with custom text"
-
-    form_fields = {
-        "custom_text": {
-            "type": "string",
-            "placeholder": "Enter custom text for this alert",
-            "label": "Custom Text",
-        },
-    }
-    def after(self, event, state):
-        """
-        This method is called when the alert rule is triggered.
-        It retrieves the custom text field value and sends the alert.
-        """
-        # Retrieve project and custom text entered in the alert rule
-        project = event.project
-        custom_text = self.get_option("custom_text")
-
-        # Create the alert message with custom text
-        alert_message = f"Alert for {project.slug}: {custom_text}"
-
-        # For demonstration purposes, we'll print the alert message.
-        # In a real setup, replace this with code to send the alert (e.g., via HTTP request, email, etc.).
-        print(alert_message)
-
-        # Example: If you want to send this to an external API or service, do it here.
-
-rules.add(CustomAlertAction)
-
-def get_tags(event):
-    tag_list = event.tags
-    if not tag_list:
-        return ()
-
-    return (
-        (tagstore.get_tag_key_label(k), tagstore.get_tag_value_label(k, v)) for k, v in tag_list
-    )
-
-class Mattermost(CorePluginMixin, notify.NotificationPlugin):
-    title = 'Mattermost'
-    slug = 'mattermost'
-    description = 'Sends alerts to Mattermost channel based on Sentry alerts rules'
-    version = sentry_mattermost.VERSION
-    timeout = 3
-    author = 'Nathan KREMER'
-    author_url = 'https://github.com/xd3coder/sentry-mattermost'
-    user_agent = 'sentry-webhooks/%s' % version
+class LoopPlugin(CorePluginMixin, notify.NotificationPlugin):
+    title = "Loop"
+    slug = "loop"
+    description = "Post notifications to a loop channel."
+    conf_key = "loop"
+    required_field = "webhook"
     feature_descriptions = [
         FeatureDescription(
             """
-            Send notifications to Mattermost channel based on Sentry alerts rules
+            Configure rule based loop notifications to automatically be posted into a
+            specific channel. Want any error that's happening more than 100 times a
+            minute to be posted in `#critical-errors`? Setup a rule for it!
             """,
             IntegrationFeatures.ALERT_RULE,
         )
     ]
 
-    def get_tag_list(self, name, project):
-        option = self.get_option(name, project)
-        if option:
-            return set(tag.strip().lower() for tag in option.split(","))
-        return None
-
-    def is_configured(self, project):
+    def is_configured(self, project) -> bool:
         return bool(self.get_option("webhook", project))
 
-    def render_notification(self, data, customFormat):
-        if customFormat:
-            template = customFormat
-        else:
-            template = "#### {project_name} - {env}\n{tags}\n\n{culprit}\n[{title}]({link})"
-        return template.format(**data)
-
-
-    def create_payload(self, event):
-        group = event.group
-        project = group.project
-
-        tags = []
-        included_tags = set(self.get_tag_list("included_tag_keys", project) or [])
-        excluded_tags = set(self.get_tag_list("excluded_tag_keys", project) or [])
-        for tag_key, tag_value in get_tags(event):
-            key = tag_key.lower()
-            std_key = tagstore.get_standardized_key(key)
-            if included_tags and key not in included_tags and std_key not in included_tags:
-                continue
-            if excluded_tags and (key in excluded_tags or std_key in excluded_tags):
-                continue
-            if self.get_option("include_keys_with_tags", project) :
-                tags.append("`{}: {}` ".format(tag_key.encode('utf-8'), tag_value.encode('utf-8')))
-            else:
-                tags.append("`{}` ".format(tag_value.encode('utf-8')))
-
-        data = {
-            "title": group.message_short.encode('utf-8'),
-            "link": group.get_absolute_url(),
-            "id": event.event_id,
-            "culprit": group.culprit.encode('utf-8'),
-            "env": event.get_environment().name,
-            "project_slug": group.project.slug,
-            "project_name": group.project.name,
-            "tags": " ".join(tags),
-            "level": event.get_tag("level"),
-            "message": event.message, "release": event.release,
-        }
-
-        icon_url = "https://xd3coder.github.io/image-host/sentry-mattermost/64/warning.jpg"
-        if self.get_option("logo_match_level", project):
-            icon_url = "https://xd3coder.github.io/image-host/sentry-mattermost/64/" + event.get_tag("level") + ".jpg"
-        payload = {
-            "username": self.get_option("username", project) or "Sentry",
-            "channel": self.get_option("channel", project),
-            "icon_url": icon_url,
-            "text": self.render_notification(data, self.get_option("custom_format", project))
-        }
-        return payload
-
-    def get_config(self, project, **kwargs):
+    def get_config(self, project, user=None, initial=None, add_additional_fields: bool = False):
         return [
             {
                 "name": "webhook",
                 "label": "Webhook URL",
                 "type": "url",
+                "placeholder": "e.g. https://hooks.loop.ru",
                 "required": True,
-                "help": "Your custom Mattermost webhook URL.",
+                "help": "Your custom Loop webhook URL.",
             },
             {
                 "name": "username",
@@ -152,44 +62,50 @@ class Mattermost(CorePluginMixin, notify.NotificationPlugin):
                 "placeholder": "e.g. Sentry",
                 "default": "Sentry",
                 "required": False,
-                "help": "The name used in channel when publishing notifications.",
+                "help": "The name used when publishing messages.",
             },
             {
-                "name": "custom_format",
-                "label": "Formatted message",
-                "type": "textarea",
-                "placeholder": "",
+                "name": "icon_url",
+                "label": "Icon URL",
+                "type": "url",
                 "required": False,
-                "help": "Customize notification message, you can use markdown. More informations here https://github.com/xd3coder/sentry-mattermost",
-            },
-            {
-                "name": "logo_match_level",
-                "label": "Background color match notification level",
-                "type": "bool",
-                "required": False,
-                "help": "Avatar in channel will use a color according to Sentry logging level.",
-            },
-            {
-                "name": "include_keys_with_tags",
-                "label": "Include tags keys in messages",
-                "type": "bool",
-                "required": False,
-                "help": "Write keys before tags in rendered messages.",
+                "help": (
+                    "The url of the icon to appear beside your bot (32px png), "
+                    "leave empty for none.<br />You may use "
+                    "http://myovchev.github.io/sentry-slack/images/logo32.png"
+                ),
             },
             {
                 "name": "channel",
                 "label": "Destination",
                 "type": "string",
                 "placeholder": "e.g. #engineering",
-                "required": True,
+                "required": False,
                 "help": "Optional #channel name or @user",
+            },
+            {
+                "name": "custom_message",
+                "label": "Custom Message",
+                "type": "string",
+                "placeholder": "e.g. Hey <!everyone> there is something wrong",
+                "required": False,
+                "help": "Optional - Slack message formatting can be used",
+            },
+            {
+                "name": "include_tags",
+                "label": "Include Tags",
+                "type": "bool",
+                "required": False,
+                "help": "Include tags with notifications",
             },
             {
                 "name": "included_tag_keys",
                 "label": "Included Tags",
                 "type": "string",
                 "required": False,
-                "help":  "Only include these tags (comma separated list). Leave empty to include all."
+                "help": (
+                    "Only include these tags (comma separated list). " "Leave empty to include all."
+                ),
             },
             {
                 "name": "excluded_tag_keys",
@@ -197,23 +113,158 @@ class Mattermost(CorePluginMixin, notify.NotificationPlugin):
                 "type": "string",
                 "required": False,
                 "help": "Exclude these tags (comma separated list).",
-            }
+            },
+            {
+                "name": "include_rules",
+                "label": "Include Rules",
+                "type": "bool",
+                "required": False,
+                "help": "Include triggering rules with notifications.",
+            },
+            {
+                "name": "exclude_project",
+                "label": "Exclude Project Name",
+                "type": "bool",
+                "default": False,
+                "required": False,
+                "help": "Exclude project name with notifications.",
+            },
+            {
+                "name": "exclude_culprit",
+                "label": "Exclude Culprit",
+                "type": "bool",
+                "default": False,
+                "required": False,
+                "help": "Exclude culprit with notifications.",
+            },
         ]
 
-    def send_webhook(self, url, data):
-        return safe_urlopen(
-            url=url,
-            json=data,
-            timeout=self.timeout,
-            user_agent=self.user_agent
+    def color_for_event(self, event):
+        return LEVEL_TO_COLOR.get(event.get_tag("level"), "error")
+
+    def _get_tags(self, event):
+        tag_list = event.tags
+        if not tag_list:
+            return ()
+
+        return (
+            (tagstore.backend.get_tag_key_label(k), tagstore.backend.get_tag_value_label(k, v))
+            for k, v in tag_list
         )
 
-    def notify(self, notification, raise_exception=False):
+    def get_tag_list(self, name, project):
+        option = self.get_option(name, project)
+        if not option:
+            return None
+        return {tag.strip().lower() for tag in option.split(",")}
+
+    def notify(self, notification: Notification, raise_exception: bool = False) -> None:
         event = notification.event
         group = event.group
         project = group.project
+
         if not self.is_configured(project):
             return
+
+        title = event.title.encode("utf-8")
+        # TODO(dcramer): we'd like this to be the event culprit, but Sentry
+        # does not currently retain it
+        if group.culprit:
+            culprit = group.culprit.encode("utf-8")
+        else:
+            culprit = None
+        project_name = project.get_full_name().encode("utf-8")
+
+        fields = []
+
+        # They can be the same if there is no culprit
+        # So we set culprit to an empty string instead of duplicating the text
+        if not self.get_option("exclude_culprit", project) and culprit and title != culprit:
+            fields.append({"title": "Culprit", "value": culprit, "short": False})
+        if not self.get_option("exclude_project", project):
+            fields.append({"title": "Project", "value": project_name, "short": True})
+
+        if self.get_option("custom_message", project):
+            fields.append(
+                {
+                    "title": "Custom message",
+                    "value": self.get_option("custom_message", project),
+                    "short": False,
+                }
+            )
+
+        if self.get_option("include_rules", project):
+            rules = []
+            for rule in notification.rules:
+                rule_link = (
+                    f"/{group.organization.slug}/{project.slug}/settings/alerts/rules/{rule.id}/"
+                )
+
+                # Make sure it's an absolute uri since we're sending this
+                # outside of Sentry into Slack
+                rule_link = absolute_uri(rule_link)
+                rules.append((rule_link, rule.label))
+
+            if rules:
+                value = ", ".join("<{} | {}>".format(*r) for r in rules)
+
+                fields.append(
+                    {"title": "Triggered By", "value": value.encode("utf-8"), "short": False}
+                )
+
+        if self.get_option("include_tags", project):
+            included_tags = set(self.get_tag_list("included_tag_keys", project) or [])
+            excluded_tags = set(self.get_tag_list("excluded_tag_keys", project) or [])
+            for tag_key, tag_value in self._get_tags(event):
+                key = tag_key.lower()
+                std_key = tagstore.backend.get_standardized_key(key)
+                if included_tags and key not in included_tags and std_key not in included_tags:
+                    continue
+                if excluded_tags and (key in excluded_tags or std_key in excluded_tags):
+                    continue
+                fields.append(
+                    {
+                        "title": tag_key.encode("utf-8"),
+                        "value": tag_value.encode("utf-8"),
+                        "short": True,
+                    }
+                )
+        payload = {
+            "attachments": [
+                {
+                    "fallback": b"[%s] %s" % (project_name, title),
+                    "title": title,
+                    "title_link": group.get_absolute_url(params={"referrer": "loop"}),
+                    "color": self.color_for_event(event),
+                    "fields": fields,
+                }
+            ]
+        }
+        client = self.get_client(project)
+
+        if client.username:
+            payload["username"] = client.username.encode("utf-8")
+
+        if client.channel:
+            payload["channel"] = client.channel
+
+        if client.icon_url:
+            payload["icon_url"] = client.icon_url
+
+        try:
+            client.request({"payload": json.dumps(payload)})
+        except ApiError as e:
+            # Ignore 404 and ignorable errors from slack webhooks.
+            if raise_exception or not (
+                e.text in IGNORABLE_SLACK_ERRORS or e.code in IGNORABLE_SLACK_ERROR_CODES
+            ):
+                raise
+
+    def get_client(self, project):
         webhook = self.get_option("webhook", project).strip()
-        payload = self.create_payload(event)
-        return safe_execute(self.send_webhook(webhook, payload))
+        # Apparently we've stored some bad data from before we used `URLField`.
+        username = (self.get_option("username", project) or "Sentry").strip()
+        icon_url = self.get_option("icon_url", project)
+        channel = (self.get_option("channel", project) or "").strip()
+
+        return LoopApiClient(webhook, username, icon_url, channel)
